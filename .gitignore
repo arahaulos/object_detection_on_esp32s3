@@ -1,0 +1,7 @@
+server/coco/data/
+server/__pycache__/
+device/.vscode/
+device/.devcontainer/
+device/managed_components/
+device/build/
+device/main/wifi_ssid_and_pwd.h
