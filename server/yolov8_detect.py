@@ -8,11 +8,11 @@ import nms
 import distance_estimation
 
 
-def dequantize(value):
+def dequantize(value, quant):
+    (mult, sub) = quant
+
     newvalue = float(value)
-    return (newvalue + 128.0)*0.00503881461918354
-
-
+    return (newvalue - sub)*mult
 
 def get_tflite_operations(interpreter):
     op_details = interpreter._get_ops_details() 
@@ -21,12 +21,16 @@ def get_tflite_operations(interpreter):
     return op_types
 
 class yolov8_detect:
-    def __init__(self, tflite_model_path):
+    def __init__(self, tflite_model_path, output_grids = [24, 12, 6]):
         self.interpreter = tf.lite.Interpreter(model_path=tflite_model_path)
         self.interpreter.allocate_tensors()
 
+        self.grid_sizes = output_grids
+
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
+
+        self.output_quant = (output_details[0]["quantization"][0], output_details[0]["quantization"][1])
 
         print(input_details)
         print(output_details)
@@ -49,16 +53,15 @@ class yolov8_detect:
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
 
-        img = np.array(input_image.resize((192, 192)))
+        imgsz = input_details[0]['shape'][1]
+        num_of_classes = output_details[0]['shape'][1] - 4
+
+        img = np.array(input_image.resize((imgsz, imgsz)))
 
         input_shape = input_details[0]['shape']
-        input_data = np.array(np.random.random_sample(input_shape), dtype=np.int8)
+        input_data = np.array(np.zeros(input_shape), dtype=np.int8)
 
-        for y in range(192):
-            for x in range(192):
-                input_data[0][y][x][0] = img[y][x][0] - 128
-                input_data[0][y][x][1] = img[y][x][1] - 128
-                input_data[0][y][x][2] = img[y][x][2] - 128
+        input_data[0][:] = img - 128
 
         self.interpreter.set_tensor(input_details[0]['index'], input_data)
 
@@ -66,29 +69,27 @@ class yolov8_detect:
 
         output_data = self.interpreter.get_tensor(output_details[0]['index'])
 
-        grid_sizes = [24, 12, 6]
         index = 0
-        for grid_size in grid_sizes:
+        for grid_size in self.grid_sizes:
 
             for i in range(grid_size*grid_size):
-                rx = dequantize(output_data[0][0][index+i])*192
-                ry = dequantize(output_data[0][1][index+i])*192
+                rx = dequantize(output_data[0][0][index+i], self.output_quant)
+                ry = dequantize(output_data[0][1][index+i], self.output_quant)
 
-                rw = dequantize(output_data[0][2][index+i])*192
-                rh = dequantize(output_data[0][3][index+i])*192
+                rw = dequantize(output_data[0][2][index+i], self.output_quant)
+                rh = dequantize(output_data[0][3][index+i], self.output_quant)
 
-                for c in range(80):
-                    cp = dequantize(output_data[0][4+c][index+i])
+                for c in range(num_of_classes):
+                    cp = dequantize(output_data[0][4+c][index+i], self.output_quant)
 
                     if (cp > confidence_treshold):
-                        bboxes.append(bbox.bbox(0, cp, 0.0, rx - rw/2, ry - rh/2, rx + rw/2, ry + rh/2))
-
+                        bboxes.append(bbox.bbox(0, cp, 0.0, rx - rw/2, ry - rh/2, rw, rh))
 
             index += grid_size*grid_size
 
         bboxes = nms.non_maximum_suppression(bboxes)
 
-        for bbox in bboxes:
-            bbox.estimated_distance = distance_estimation.estimate_distance(bbox, 0.6, 1.75)
+        for bb in bboxes:
+            bb.estimated_distance = distance_estimation.estimate_distance(bb, 0.6, 1.75)
 
         return bboxes

@@ -54,5 +54,5 @@ def convert_coco_labels(coco_files_path, coco_annonations_file, images_output_fo
     print("\nNew dataset created!")
 
 
-convert_coco_labels("data/train2017/", "data/annotations/instances_train2017.json", "newdataset/images/train2017/", "newdataset/labels/train2017/", "newdataset/train2017.txt", ["person"])
-convert_coco_labels("data/val2017/", "data/annotations/instances_val2017.json", "newdataset/images/val2017/", "newdataset/labels/val2017/", "newdataset/val2017.txt", ["person"])
+convert_coco_labels("data/train2017/", "data/annotations/instances_train2017.json", "newdataset2/images/train2017/", "newdataset2/labels/train2017/", "newdataset2/train2017.txt", ["person", "bicycle", "car"])
+convert_coco_labels("data/val2017/", "data/annotations/instances_val2017.json", "newdataset2/images/val2017/", "newdataset2/labels/val2017/", "newdataset2/val2017.txt", ["person", "bicycle", "car"])
