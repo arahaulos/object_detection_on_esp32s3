@@ -19,9 +19,9 @@ def draw_bboxes(image, bboxes, color):
 
         edist = bbox.estimated_distance
 
-        draw.rectangle([(nbb.x, nbb.y), (nbb.x + nbb.w, nbb.y + nbb.h)], outline=color, width=8)
+        draw.rectangle([(nbb.x, nbb.y), (nbb.x + nbb.w, nbb.y + nbb.h)], outline=color, width=4)
 
-        draw.text((nbb.x, nbb.y), "{0:.3g}".format(edist))
+        draw.text((nbb.x, nbb.y), "{0:.3g}".format(bbox.estimated_distance))
     
     return image
 

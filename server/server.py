@@ -1,5 +1,6 @@
 from PIL import Image
 import socket
+import time
 
 from threading import Thread
 import struct
@@ -65,6 +66,14 @@ class server:
         print("Image size {}".format(image_data_length))
 
         image_data = self.receive_bytes(sock, image_data_length)
+
+
+        time_point = time.perf_counter()
+        interval_time_ms = int((time_point - self.last_received_image_time)*1000)
+        self.last_received_image_time = time_point
+
+        print("interval: {}ms".format(interval_time_ms))
+
 
         return Image.open(io.BytesIO(image_data))
         
@@ -140,6 +149,8 @@ class server:
         self.last_received_image = None
         self.last_received_bboxes = None
         self.object_detector = object_detector
+
+        self.last_received_image_time = time.perf_counter()
 
         self.active_threads = []
         self.thread = Thread(target = self.server_loop, args = (ip, port))

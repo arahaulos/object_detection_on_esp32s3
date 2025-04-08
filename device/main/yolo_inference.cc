@@ -275,8 +275,6 @@ extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_
 
     for (int i = 0; i < *num_of_bboxes; i++) {
         bboxes[i].estimated_distance = estimate_distance(&bboxes[i]);
-
-        printf("%f %f\n", bboxes[i].x, bboxes[i].y);
     }
 
     return bboxes;
