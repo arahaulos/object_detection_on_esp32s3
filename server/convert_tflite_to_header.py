@@ -17,8 +17,8 @@ def convert_tflite_to_header(tflite_path, output_header_path):
         header_file.write('};\n\n')
         
 if __name__ == "__main__":
-    tflite_path = 'last-int8.tflite'
-    output_header_path = 'yolov5.h'
+    tflite_path = 'yolov8n_full_integer_quant.tflite'
+    output_header_path = 'yolov8.h'
 
     convert_tflite_to_header(tflite_path, output_header_path)
     convert_tflite_to_header(tflite_path, output_header_path)

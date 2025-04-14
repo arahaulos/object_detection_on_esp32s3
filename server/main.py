@@ -29,7 +29,7 @@ def draw_bboxes(image, bboxes, color):
 def main_loop():
 
     #yolo = yolov5_detect.yolov5_detect("last-int8.tflite")
-    yolo = yolov8_detect.yolov8_detect("yolov8n_full_integer_quant.tflite", output_grids=[40, 20, 10])
+    yolo = yolov8_detect.yolov8_detect("yolov8n_full_integer_quant.tflite")
     serv = server.server("192.168.1.101", 6969, yolo)
 
     width, height = 640, 480
@@ -37,24 +37,18 @@ def main_loop():
 
     running = True
     while running:
-        #image = Image.open("test.jpg")
-        #start = time.time()
-        #bboxes = yolo.detect(image)
-        #inference_time = time.time() - start
-        #print("{}ms".format(inference_time*1000))
-
-        #draw_bboxes(image, bboxes, "red")
-        #surf = pygame.image.fromstring(image.tobytes(), image.size, image.mode)
-        #screen.blit(surf, (0, 0))
-
-
         image = serv.get_last_received_image()
         bboxes = serv.get_last_received_bboxes()
 
         if (image != None):
             image = image.resize((width, height))
+            #bboxes2 = yolo.detect(image)
+
             if (bboxes != None):
-                draw_bboxes(image, bboxes, "red")
+                image = draw_bboxes(image, bboxes, "red")
+
+            #if (bboxes2 != None):
+            #    image = draw_bboxes(image, bboxes2, "green")
 
             width, height = image.size
 

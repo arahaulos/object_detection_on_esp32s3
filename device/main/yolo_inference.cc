@@ -12,7 +12,16 @@
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "esp_timer.h"
 
+
+#define USE_YOLOV5N6_XIAO
+
+#ifdef USE_YOLOV5N6_XIAO
 #include "yolov5.h"
+#endif
+
+#ifdef USE_YOLOV8N
+#include "yolov8.h"
+#endif
 
 #include <esp_heap_caps.h>
 
@@ -32,6 +41,10 @@ constexpr float OBJECT_ESTIMATED_SIZE[NUM_OF_CLASSES*2] =
 
 float estimate_distance(detected_bbox *bbox, float vertical_fov = 66.0f*M_PI/180.0f, float aspect_ratio = 320.0f/240.0f)
 {
+    if (bbox->object_type < 0 || bbox->object_type >= NUM_OF_CLASSES) {
+        return 0.0;
+    }
+
     float horizontal_fov = vertical_fov / aspect_ratio;
 
     float object_width_angle = bbox->w * vertical_fov;
@@ -116,16 +129,16 @@ tflite::MicroInterpreter *interpreter = nullptr;
 
 extern "C" void init_yolo(void)
 {
-    static uint8_t *weights = (uint8_t *) heap_caps_malloc(sizeof(yolov5_weights), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    static uint8_t *weights = (uint8_t *) heap_caps_malloc(sizeof(yolo_model_data), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     printf("Initializing yolo\n");
-    printf("Weights: %dkB\n", sizeof(yolov5_weights) / 1024);
+    printf("Weights: %dkB\n", sizeof(yolo_model_data) / 1024);
 
     if (weights == nullptr) {
         printf("Unable to allocate space for weights in PSRAM!\n");
-        weights = (uint8_t*)yolov5_weights;
+        weights = (uint8_t*)yolo_model_data;
     } else {
-        memcpy(weights, yolov5_weights, sizeof(yolov5_weights));
+        memcpy(weights, yolo_model_data, sizeof(yolo_model_data));
     }
 
 
@@ -134,8 +147,9 @@ extern "C" void init_yolo(void)
 
     const tflite::Model* model = tflite::GetModel(weights);
 
-    static tflite::MicroMutableOpResolver<13> micro_op_resolver;
+    #ifdef USE_YOLOV5N6_XIAO
 
+    static tflite::MicroMutableOpResolver<13> micro_op_resolver;
     micro_op_resolver.AddAdd();
     micro_op_resolver.AddConcatenation();
     micro_op_resolver.AddConv2D();
@@ -149,6 +163,30 @@ extern "C" void init_yolo(void)
     micro_op_resolver.AddStridedSlice();
     micro_op_resolver.AddSub();
     micro_op_resolver.AddTranspose();
+
+    #endif
+
+    #ifdef USE_YOLOV8N
+
+    static tflite::MicroMutableOpResolver<14> micro_op_resolver;
+    micro_op_resolver.AddAdd();
+    micro_op_resolver.AddConcatenation();
+    micro_op_resolver.AddConv2D();
+    //micro_op_resolver.AddDelegate();
+    micro_op_resolver.AddLogistic();
+    micro_op_resolver.AddMaxPool2D();
+    micro_op_resolver.AddMul();
+    micro_op_resolver.AddPad();
+    micro_op_resolver.AddQuantize();
+    micro_op_resolver.AddReshape();
+    micro_op_resolver.AddResizeNearestNeighbor();
+    micro_op_resolver.AddSoftmax();
+    micro_op_resolver.AddStridedSlice();
+    micro_op_resolver.AddSub();
+    micro_op_resolver.AddTranspose();
+
+    #endif
+
 
     printf("Creating MicroInterpreter\n");
 
@@ -226,50 +264,88 @@ extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_
 
     int detected_bboxes = 0;
 
-    static const int32_t output_heads[4] = {24, 12, 6, 3};
+    #ifdef USE_YOLOV5N6_XIAO
 
-    int32_t head_index = 0;
+    int num_of_classes = output_tensor->dims->data[2] - 5;
 
-    for (int32_t i = 0; i < 4; i++) {
-        int32_t grid_res = output_heads[i];
+    for (int32_t i = 0; i < output_tensor->dims->data[1]; i++) {
+        int32_t index = i*output_tensor->dims->data[2];
 
-        for (int32_t j = 0; j < 3; j++) {
-            for (int32_t k = 0; k < grid_res*grid_res; k++) {
-                int32_t index = (head_index + k)*(5+NUM_OF_CLASSES);
+        int8_t qx = output[index+0];
+        int8_t qy = output[index+1];
+        int8_t qw = output[index+2];
+        int8_t qh = output[index+3];
+        int8_t qc = output[index+4];
 
-                int8_t qx = output[index+0];
-                int8_t qy = output[index+1];
-                int8_t qw = output[index+2];
-                int8_t qh = output[index+3];
-                int8_t qc = output[index+4];
+        float coinfidence = dequantize(qc, output_tensor);
+        if (coinfidence > CONFIDENCE_TRESHOLD && detected_bboxes < MAX_BBOX) {
+            detected_bbox *bbox = &bboxes[detected_bboxes];
 
-                float coinfidence = dequantize(qc, output_tensor);
-                if (coinfidence > CONFIDENCE_TRESHOLD && detected_bboxes < MAX_BBOX) {
-                    detected_bbox *bbox = &bboxes[detected_bboxes];
+            bbox->confidence = coinfidence;
 
-                    bbox->confidence = coinfidence;
+            bbox->w = dequantize(qw, output_tensor);
+            bbox->h = dequantize(qh, output_tensor);
 
-                    bbox->w = dequantize(qw, output_tensor);
-                    bbox->h = dequantize(qh, output_tensor);
+            bbox->x = dequantize(qx, output_tensor) - bbox->w*0.5f;
+            bbox->y = dequantize(qy, output_tensor) - bbox->h*0.5f;
 
-                    bbox->x = dequantize(qx, output_tensor) - bbox->w*0.5f;
-                    bbox->y = dequantize(qy, output_tensor) - bbox->h*0.5f;
-
-                    bbox->object_type = 0;
-                    int8_t max_prob = output[index+5];
-                    for (int c = 0; c < NUM_OF_CLASSES; c++) {
-                        if (output[index+5+c] > max_prob) {
-                            bbox->object_type = c;
-                            max_prob = output[index+5+c];
-                        }
-                    }
-
-                    detected_bboxes++;
+            bbox->object_type = 0;
+            int8_t max_prob = output[index+5];
+            for (int c = 0; c < num_of_classes; c++) {
+                if (output[index+5+c] > max_prob) {
+                    bbox->object_type = c;
+                    max_prob = output[index+5+c];
                 }
             }
-            head_index += grid_res*grid_res;
+
+            detected_bboxes++;
         }
     }
+    #endif
+
+    #ifdef USE_YOLOV8N
+
+    int num_of_classes = output_tensor->dims->data[1] - 4;
+
+    for (int32_t i = 0; i < output_tensor->dims->data[2]; i++) {
+        int8_t vec[128];
+        for (int j = 0; j < 4+num_of_classes; j++) {
+            vec[j] = output[j*output_tensor->dims->data[2]+i];
+        }
+
+        int8_t qx = vec[0];
+        int8_t qy = vec[1];
+        int8_t qw = vec[2];
+        int8_t qh = vec[3];
+ 
+        int cp = vec[4];
+        int best_class = 0;
+
+        for (int j = 0; j < num_of_classes; j++) {
+            if (vec[j+4] > cp) {
+                best_class = j;
+                cp = vec[j+4];
+            }
+        }
+
+        float probability = dequantize(cp, output_tensor);
+        if (probability > CONFIDENCE_TRESHOLD && detected_bboxes < MAX_BBOX) {
+            detected_bbox *bbox = &bboxes[detected_bboxes];
+
+            bbox->confidence = probability;
+
+            bbox->w = dequantize(qw, output_tensor);
+            bbox->h = dequantize(qh, output_tensor);
+
+            bbox->x = dequantize(qx, output_tensor) - bbox->w*0.5f;
+            bbox->y = dequantize(qy, output_tensor) - bbox->h*0.5f;
+
+            bbox->object_type = best_class;
+
+            detected_bboxes++;
+        }
+    }
+    #endif
     
     *num_of_bboxes = non_maximum_suppression(bboxes, detected_bboxes, IOU_TRESHOLD);
 

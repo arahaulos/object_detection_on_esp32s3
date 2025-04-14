@@ -177,6 +177,9 @@ void app_main(void)
     }
     ESP_ERROR_CHECK( ret );
 
+    esp_netif_init();
+    esp_event_loop_create_default();
+
     connect_wifi(WIFI_SSID, WIFI_PWD);
 
     init_yolo();

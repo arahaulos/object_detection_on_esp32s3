@@ -21,11 +21,9 @@ def get_tflite_operations(interpreter):
     return op_types
 
 class yolov8_detect:
-    def __init__(self, tflite_model_path, output_grids = [24, 12, 6]):
+    def __init__(self, tflite_model_path):
         self.interpreter = tf.lite.Interpreter(model_path=tflite_model_path)
         self.interpreter.allocate_tensors()
-
-        self.grid_sizes = output_grids
 
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
@@ -53,12 +51,13 @@ class yolov8_detect:
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
 
-        imgsz = input_details[0]['shape'][1]
-        num_of_classes = output_details[0]['shape'][1] - 4
-
-        img = np.array(input_image.resize((imgsz, imgsz)))
-
         input_shape = input_details[0]['shape']
+        output_shape = output_details[0]['shape']
+
+        num_of_classes = output_shape[1] - 4
+
+        img = np.array(input_image.resize((input_shape[1], input_shape[2])))
+
         input_data = np.array(np.zeros(input_shape), dtype=np.int8)
 
         input_data[0][:] = img - 128
@@ -69,23 +68,19 @@ class yolov8_detect:
 
         output_data = self.interpreter.get_tensor(output_details[0]['index'])
 
-        index = 0
-        for grid_size in self.grid_sizes:
+        for i in range(output_shape[2]):
+            rx = dequantize(output_data[0][0][i], self.output_quant)
+            ry = dequantize(output_data[0][1][i], self.output_quant)
 
-            for i in range(grid_size*grid_size):
-                rx = dequantize(output_data[0][0][index+i], self.output_quant)
-                ry = dequantize(output_data[0][1][index+i], self.output_quant)
+            rw = dequantize(output_data[0][2][i], self.output_quant)
+            rh = dequantize(output_data[0][3][i], self.output_quant)
 
-                rw = dequantize(output_data[0][2][index+i], self.output_quant)
-                rh = dequantize(output_data[0][3][index+i], self.output_quant)
+            for c in range(num_of_classes):
+                cp = dequantize(output_data[0][4+c][i], self.output_quant)
 
-                for c in range(num_of_classes):
-                    cp = dequantize(output_data[0][4+c][index+i], self.output_quant)
+                if (cp > confidence_treshold):
+                    bboxes.append(bbox.bbox(0, cp, 0.0, rx - rw/2, ry - rh/2, rw, rh))
 
-                    if (cp > confidence_treshold):
-                        bboxes.append(bbox.bbox(0, cp, 0.0, rx - rw/2, ry - rh/2, rw, rh))
-
-            index += grid_size*grid_size
 
         bboxes = nms.non_maximum_suppression(bboxes)
 

@@ -48,9 +48,6 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 
 void connect_wifi(char *wifi_ssid, char *wifi_pwd)
 {
-    esp_netif_init();
-    esp_event_loop_create_default();
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
 
