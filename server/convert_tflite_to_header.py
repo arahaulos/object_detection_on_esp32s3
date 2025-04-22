@@ -12,13 +12,12 @@ def convert_tflite_to_header(tflite_path, output_header_path):
 
     with open(output_header_path, 'w') as header_file:
         
-        header_file.write('const unsigned char yolov5_weights[] = {\n  ')
+        header_file.write('const unsigned char yolo_model_data[] = {\n  ')
         header_file.write(f'{hex_array}\n')
         header_file.write('};\n\n')
         
 if __name__ == "__main__":
-    tflite_path = 'yolov8n_full_integer_quant.tflite'
-    output_header_path = 'yolov8.h'
+    tflite_path = 'last-int8.tflite'
+    output_header_path = 'yolov5_256.h'
 
-    convert_tflite_to_header(tflite_path, output_header_path)
     convert_tflite_to_header(tflite_path, output_header_path)

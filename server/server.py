@@ -21,6 +21,8 @@ class server:
             data += bytes
             received += len(bytes)
 
+        self.frametimes = []
+
         return data
     
     def receive_string(self, sock):
@@ -117,7 +119,6 @@ class server:
             if (self.last_received_image != None):
                 bboxes = self.object_detector.detect(self.last_received_image)
                 self.send_bboxes(sock, bboxes)
-
         else:
             print("unknown request")
 

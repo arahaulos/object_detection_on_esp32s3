@@ -12,15 +12,33 @@
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "esp_timer.h"
 
-
+#define IMGZ_192
 #define USE_YOLOV5N6_XIAO
+#define USE_BILINEAR_INTERP 0
 
 #ifdef USE_YOLOV5N6_XIAO
-#include "yolov5.h"
+
+#ifdef IMGZ_192
+#include "yolov5_192.h"
+#endif
+
+#ifdef IMGZ_256
+#include "yolov5_256.h"
+#endif
+
 #endif
 
 #ifdef USE_YOLOV8N
-#include "yolov8.h"
+
+#ifdef IMGZ_192
+#include "yolov8_192.h"
+#endif
+
+#ifdef IMGZ_256
+#include "yolov8_256.h"
+#endif
+
+
 #endif
 
 #include <esp_heap_caps.h>
@@ -142,7 +160,7 @@ extern "C" void init_yolo(void)
     }
 
 
-    constexpr size_t tensor_arena_size = 512*1024;
+    constexpr size_t tensor_arena_size = 1024*1024;
     static uint8_t *tensor_arena = (uint8_t *) heap_caps_malloc(tensor_arena_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     const tflite::Model* model = tflite::GetModel(weights);
@@ -219,31 +237,89 @@ extern "C" void init_yolo(void)
     printf("test");
 }
 
-inline float dequantize(int16_t value, TfLiteTensor *tensor)
+
+void scale_input_bilinear(TfLiteTensor *input, uint8_t  *fb, int16_t w, int16_t h)
 {
-    float f = (value - tensor->params.zero_point);
-    return f*tensor->params.scale;
+    int16_t imgz = input->dims->data[1];
+
+    int8_t *out = input->data.int8;
+
+    for (int16_t y = 0; y < imgz; y++) {
+        for (int16_t x = 0; x < imgz; x++) {
+            float fx = (float)x / (imgz-1);
+            float fy = (float)y / (imgz-1);
+
+            float ox = fx * (w-1);
+            float oy = fy * (h-1);
+
+            int16_t ix0 = (int16_t)ox;
+            int16_t iy0 = (int16_t)oy;
+
+            int16_t ix1 = std::min(ix0 + 1, w-1);
+            int16_t iy1 = std::min(iy0 + 1, h-1);
+
+            float wx1 = ox - ix0;
+            float wy1 = oy - iy0; 
+
+            float wx0 = 1.0f - wx1;
+            float wy0 = 1.0f - wy1;
+
+            for (int i = 0; i < 3; i++) {
+                float c00 = fb[(iy0 * w + ix0)*3 + i];
+                float c10 = fb[(iy0 * w + ix1)*3 + i];
+                float c01 = fb[(iy1 * w + ix0)*3 + i];
+                float c11 = fb[(iy1 * w + ix1)*3 + i];
+
+                float c0 = (wx0 * c00) + (wx1 * c10);
+                float c1 = (wx0 * c01) + (wx1 * c11);
+
+                float c = (wy0 * c0) + (wy1 * c1);
+
+                out[(y * imgz + x)*3 + i] = std::clamp((int)c - 128, -128, 127);
+            }
+        }
+    }
 }
 
-extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_t *num_of_bboxes)
-{
-    TfLiteTensor *input = interpreter->input(0);
-    int8_t *input_ptr = input->data.int8;
 
-    for (int32_t y = 0; y < 192; y++) {
-        for (int32_t x = 0; x < 192; x++) {
-            int32_t nx = (x * w) / 192;
-            int32_t ny = (y * h) / 192;
+void scale_input_nearest(TfLiteTensor *input, uint8_t  *fb, int32_t w, int32_t h)
+{
+    int32_t imgz = input->dims->data[1];
+
+    int8_t *out = input->data.int8;
+
+    for (int32_t y = 0; y < imgz; y++) {
+        for (int32_t x = 0; x < imgz; x++) {
+            int32_t nx = (x * w) / imgz;
+            int32_t ny = (y * h) / imgz;
 
             int32_t r = fb[(ny * w + nx)*3 + 0];
             int32_t g = fb[(ny * w + nx)*3 + 1];
             int32_t b = fb[(ny * w + nx)*3 + 2];
 
             
-            input_ptr[(y * 192 + x)*3 + 0] = r - 128;
-            input_ptr[(y * 192 + x)*3 + 1] = g - 128;
-            input_ptr[(y * 192 + x)*3 + 2] = b - 128;
+            out[(y * imgz + x)*3 + 0] = r - 128;
+            out[(y * imgz + x)*3 + 1] = g - 128;
+            out[(y * imgz + x)*3 + 2] = b - 128;
         }
+    }
+}
+
+inline float dequantize(int16_t value, TfLiteTensor *tensor)
+{
+    float f = (value - tensor->params.zero_point);
+    return f*tensor->params.scale;
+}
+
+
+extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_t *num_of_bboxes)
+{
+    TfLiteTensor *input = interpreter->input(0);
+
+    if (USE_BILINEAR_INTERP) {
+        scale_input_bilinear(input, fb, w, h);
+    } else {
+        scale_input_nearest(input, fb, w, h);
     }
 
     uint64_t start = esp_timer_get_time();

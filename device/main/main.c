@@ -23,25 +23,51 @@
 #define IMAGE_BUFFER_SIZE 16*1024
 #define BBOX_BUFFER_SIZE 64
 
+#define FRAMETIME_BUFFER_SIZE 512
 
-uint8_t *wifi_image_buffer;
-detected_bbox *wifi_bboxes_buffer;
-uint32_t wifi_num_of_bboxes;
-uint32_t wifi_image_len;
+
+struct image_transmit_buffer_t
+{
+    uint8_t *image_buffer;
+    detected_bbox *bboxes_buffer;
+    uint32_t num_of_bboxes;
+    uint32_t image_len;
+};
+
+struct camera_image_buffer_t
+{
+    uint8_t *jpeg_image;
+    uint8_t *decoded_image;
+    uint32_t image_width;
+    uint32_t image_height;
+    uint32_t image_len;
+};
+
 
 bool wifi_sent_flag = true;
 bool wifi_transmit_flag = false;
 
-
-
-uint8_t *camera_image;
-uint8_t *decoded_image;
-uint32_t image_width;
-uint32_t image_height;
-uint32_t image_len;
-
 bool camera_trigger_flag = false;
 bool camera_image_ready_flag = false;
+
+
+struct camera_image_buffer_t camera_image_buffer;
+struct image_transmit_buffer_t image_transmit_buffer;
+
+void init_image_transmit_buffer(struct image_transmit_buffer_t *buffer)
+{
+    buffer->image_buffer = (uint8_t *) heap_caps_malloc(IMAGE_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buffer->image_buffer) {
+        printf("image buffer allocation failed\n");
+    }
+    buffer->bboxes_buffer = (detected_bbox *) heap_caps_malloc(BBOX_BUFFER_SIZE*sizeof(detected_bbox), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buffer->bboxes_buffer) {
+        printf("bboxes buffer allocation failed\n");
+    }
+    buffer->num_of_bboxes = 0;
+    buffer->image_len = 0;
+}
+
 
 
 void wifi_task(void *pvParameters)
@@ -57,8 +83,8 @@ void wifi_task(void *pvParameters)
 
             uint64_t start = esp_timer_get_time();
 
-            send_image(&server, wifi_image_buffer, wifi_image_len);
-            send_bboxes(&server, wifi_bboxes_buffer, wifi_num_of_bboxes);
+            send_image(&server, image_transmit_buffer.image_buffer, image_transmit_buffer.image_len);
+            send_bboxes(&server, image_transmit_buffer.bboxes_buffer, image_transmit_buffer.num_of_bboxes);
 
             uint64_t end = esp_timer_get_time();
             printf("Transmit time: %ld ms\n", (int32_t)((end - start)/1000));
@@ -81,8 +107,8 @@ void camera_task(void *pvParametrs)
 
             uint64_t start = esp_timer_get_time();
 
-            camera_image = take_picture(&image_len, &image_width, &image_height);
-            decoded_image = decode_image(camera_image, image_len);
+            camera_image_buffer.jpeg_image = take_picture(&camera_image_buffer.image_len, &camera_image_buffer.image_width, &camera_image_buffer.image_height);
+            camera_image_buffer.decoded_image = decode_image(camera_image_buffer.jpeg_image, camera_image_buffer.image_len);
 
             uint64_t end = esp_timer_get_time();
             printf("Camera time: %ld ms\n", (int32_t)((end - start)/1000));
@@ -118,14 +144,14 @@ void object_detection_task(void *pvParameters)
                 camera_image_ready_flag = false;
 
                 if (local_decoded_image_buffer == NULL) {
-                    local_decoded_image_buffer = (uint8_t *) heap_caps_malloc(image_width*image_height*3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    local_decoded_image_buffer = (uint8_t *) heap_caps_malloc(camera_image_buffer.image_width*camera_image_buffer.image_height*3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 }
 
-                memcpy(local_decoded_image_buffer, decoded_image, image_width*image_height*3);
-                memcpy(local_image_buffer, camera_image, image_len);
-                local_image_len = image_len;
-                local_image_width = image_width;
-                local_image_height = image_height;
+                memcpy(local_decoded_image_buffer, camera_image_buffer.decoded_image, camera_image_buffer.image_width*camera_image_buffer.image_height*3);
+                memcpy(local_image_buffer, camera_image_buffer.jpeg_image, camera_image_buffer.image_len);
+                local_image_len = camera_image_buffer.image_len;
+                local_image_width = camera_image_buffer.image_width;
+                local_image_height = camera_image_buffer.image_height;
 
                 camera_trigger_flag = true;
 
@@ -149,11 +175,11 @@ void object_detection_task(void *pvParameters)
             if (wifi_sent_flag) {
                 wifi_sent_flag = false;
 
-                memcpy((void*)wifi_image_buffer, local_image_buffer, local_image_len*sizeof(uint8_t));
-                memcpy((void*)wifi_bboxes_buffer, bboxes, num_of_bboxes*sizeof(detected_bbox));
+                memcpy((void*)image_transmit_buffer.image_buffer, local_image_buffer, local_image_len*sizeof(uint8_t));
+                memcpy((void*)image_transmit_buffer.bboxes_buffer, bboxes, num_of_bboxes*sizeof(detected_bbox));
 
-                wifi_num_of_bboxes = num_of_bboxes;
-                wifi_image_len = local_image_len;
+                image_transmit_buffer.num_of_bboxes = num_of_bboxes;
+                image_transmit_buffer.image_len = local_image_len;
                 
                 wifi_transmit_flag = true;
 
@@ -185,17 +211,7 @@ void app_main(void)
     init_yolo();
     init_camera();
 
-    wifi_image_buffer = (uint8_t *) heap_caps_malloc(IMAGE_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!wifi_image_buffer) {
-        printf("image buffer allocation failed\n");
-    }
-    wifi_bboxes_buffer = (detected_bbox *) heap_caps_malloc(BBOX_BUFFER_SIZE*sizeof(detected_bbox), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!wifi_bboxes_buffer) {
-        printf("bboxes buffer allocation failed\n");
-    }
-    wifi_num_of_bboxes = 0;
-    wifi_image_len = 0;
-
+    init_image_transmit_buffer(&image_transmit_buffer);
     wifi_sent_flag = true;
     wifi_transmit_flag = false;
 
