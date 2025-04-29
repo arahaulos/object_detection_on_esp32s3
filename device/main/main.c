@@ -51,7 +51,7 @@ bool camera_image_ready_flag = false;
 
 
 bool transmit_image_and_bboxes = false;
-bool use_offboard_detection = true;
+bool use_offboard_detection = false;
 
 
 struct camera_image_buffer_t camera_image_buffer;
@@ -246,7 +246,7 @@ void app_main(void)
 
     connect_wifi(WIFI_SSID, WIFI_PWD);
 
-    init_server_info(&server, "192.168.1.101", 6969);
+    init_server_info(&server, "192.168.1.101", 6900);
     init_yolo();
     init_camera();
 

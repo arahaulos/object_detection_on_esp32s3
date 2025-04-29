@@ -29,7 +29,7 @@ def draw_bboxes(image, bboxes, color):
 def main_loop():
 
     yolo = yolov8_detect.yolov8_detect("yolov8n_256x256.tflite")
-    serv = server.server("192.168.1.101", 6969, yolo)
+    serv = server.server("0.0.0.0", 6901, yolo)
 
     width, height = 640, 480
     screen = pygame.display.set_mode((width, height))

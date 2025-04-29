@@ -12,8 +12,8 @@
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "esp_timer.h"
 
-#define IMGZ_192
-#define USE_YOLOV5N6_XIAO
+#define IMGZ_256
+#define USE_YOLOV8N
 #define USE_BILINEAR_INTERP 0
 
 #ifdef USE_YOLOV5N6_XIAO

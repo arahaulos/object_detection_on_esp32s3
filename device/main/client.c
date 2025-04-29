@@ -95,7 +95,7 @@ void receive_string(int sock, char *buffer, int buffer_size)
     while (bytes_received < buffer_size) {
         int received = recv(sock, &buffer[bytes_received], 1, 0);
 
-        printf("%c\n", buffer[bytes_received]);
+        //printf("%c\n", buffer[bytes_received]);
 
         if (buffer[bytes_received] == 0) {
             break;
@@ -170,7 +170,7 @@ bool test_connection(server_info *addr)
 
     close_connection(sock);
 
-    printf("%s\n", buffer);
+    //printf("%s\n", buffer);
 
     if (strcmp(buffer, "ping") == 0) {
         return true;

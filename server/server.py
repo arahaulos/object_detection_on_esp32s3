@@ -120,7 +120,16 @@ class server:
                 self.last_received_bboxes[client] = bboxes
         elif (request == "request_object_detection"):
             if (client in self.last_received_image):
+
+                start_time = time.perf_counter()
+
                 bboxes = self.object_detector.detect(self.last_received_image[client])
+
+                end_time = time.perf_counter()
+                inference_time_ms = int((end_time - start_time)*1000)
+                print("Inference: {}ms".format(inference_time_ms))
+
+
                 self.last_received_bboxes[client] = bboxes
                 self.send_bboxes(sock, bboxes)
             else:
@@ -136,6 +145,7 @@ class server:
 
     def server_loop(self, ip, port):
         tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tcp_socket.bind((ip, port))
         tcp_socket.setblocking(False)
         tcp_socket.listen(0)
@@ -151,6 +161,8 @@ class server:
                 self.active_threads.append(new_thread)
             except BlockingIOError:
                 pass
+
+        tcp_socket.close()
             
     def __init__(self, ip, port, object_detector):
         self.running = True
