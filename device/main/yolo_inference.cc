@@ -47,8 +47,8 @@ constexpr float CONFIDENCE_TRESHOLD = 0.25f;
 constexpr float IOU_TRESHOLD = 0.25f;
 constexpr int NUM_OF_CLASSES = 1;
 
-constexpr int MAX_BBOX = 64;
-detected_bbox bboxes[MAX_BBOX];
+constexpr int MAX_TEMP_BBOX = 256;
+bbox temp_bboxes[MAX_TEMP_BBOX];
 
 
 constexpr float OBJECT_ESTIMATED_SIZE[NUM_OF_CLASSES*2] =
@@ -57,19 +57,19 @@ constexpr float OBJECT_ESTIMATED_SIZE[NUM_OF_CLASSES*2] =
 };
 
 
-float estimate_distance(detected_bbox *bbox, float vertical_fov = 66.0f*M_PI/180.0f, float aspect_ratio = 320.0f/240.0f)
+float estimate_distance(bbox *bb, float vertical_fov = 66.0f*M_PI/180.0f, float aspect_ratio = 320.0f/240.0f)
 {
-    if (bbox->object_type < 0 || bbox->object_type >= NUM_OF_CLASSES) {
+    if (bb->object_type < 0 || bb->object_type >= NUM_OF_CLASSES) {
         return 0.0;
     }
 
     float horizontal_fov = vertical_fov / aspect_ratio;
 
-    float object_width_angle = bbox->w * vertical_fov;
-    float object_height_angle = bbox->h * horizontal_fov;
+    float object_width_angle = bb->w * vertical_fov;
+    float object_height_angle = bb->h * horizontal_fov;
 
-    float object_estimated_width = OBJECT_ESTIMATED_SIZE[bbox->object_type*2 + 0];
-    float object_estimated_height = OBJECT_ESTIMATED_SIZE[bbox->object_type*2 + 1];
+    float object_estimated_width = OBJECT_ESTIMATED_SIZE[bb->object_type*2 + 0];
+    float object_estimated_height = OBJECT_ESTIMATED_SIZE[bb->object_type*2 + 1];
 
     float distance0 = (0.5*object_estimated_width)/(tan(object_width_angle*0.5));
     float distance1 = (0.5*object_estimated_height)/(tan(object_height_angle*0.5));
@@ -96,15 +96,15 @@ float axis_overlap(float a0, float a1, float b0, float b1) {
 }
 
 
-float intersection_over_union(detected_bbox *bbox0, detected_bbox *bbox1)
+float intersection_over_union(bbox *bb0, bbox *bb1)
 {
-    float overlap_area = axis_overlap(bbox0->x, bbox0->x + bbox0->w, bbox1->x, bbox1->x + bbox1->w)*axis_overlap(bbox0->y, bbox0->y + bbox0->h, bbox1->y, bbox1->y + bbox1->h);
-    float union_area = bbox0->w*bbox0->h + bbox1->w*bbox1->h - overlap_area;
+    float overlap_area = axis_overlap(bb0->x, bb0->x + bb0->w, bb1->x, bb1->x + bb1->w)*axis_overlap(bb0->y, bb0->y + bb0->h, bb1->y, bb1->y + bb1->h);
+    float union_area = bb0->w*bb0->h + bb1->w*bb1->h - overlap_area;
 
     return overlap_area / union_area;
 }
 
-int suppress_bboxes(detected_bbox *bboxes, int num_of_boxes, int index, float iou_treshold)
+int suppress_bboxes(bbox *bboxes, int num_of_boxes, int index, float iou_treshold)
 {
     for (int i = index+1; i < num_of_boxes; i++) {
         float iou = intersection_over_union(&bboxes[index], &bboxes[i]);
@@ -119,8 +119,8 @@ int suppress_bboxes(detected_bbox *bboxes, int num_of_boxes, int index, float io
 
 int sort_compare(const void *a_ptr, const void *b_ptr)
 {
-    detected_bbox *a = (detected_bbox*)a_ptr;
-    detected_bbox *b = (detected_bbox*)b_ptr;
+    bbox *a = (bbox*)a_ptr;
+    bbox *b = (bbox*)b_ptr;
 
     if (a->confidence == b->confidence) {
         return 0;
@@ -131,13 +131,14 @@ int sort_compare(const void *a_ptr, const void *b_ptr)
     }
 }
 
-int non_maximum_suppression(detected_bbox* bboxes, int num_of_boxes, float iou_treshold)
+int non_maximum_suppression(bbox* bboxes, int num_of_boxes, float iou_treshold)
 {
     for (int i = 0; i < num_of_boxes; i++) {
-        qsort(bboxes, num_of_boxes, sizeof(detected_bbox), &sort_compare);
+        qsort(bboxes, num_of_boxes, sizeof(bbox), &sort_compare);
 
         num_of_boxes = suppress_bboxes(bboxes, num_of_boxes, i, iou_treshold);
     }
+    qsort(bboxes, num_of_boxes, sizeof(bbox), &sort_compare);
     return num_of_boxes;
 }
 
@@ -232,9 +233,6 @@ extern "C" void init_yolo(void)
         printf("%d ", output->dims->data[i]);
     }
     printf("\n");
-    
-
-    printf("test");
 }
 
 
@@ -312,9 +310,11 @@ inline float dequantize(int16_t value, TfLiteTensor *tensor)
 }
 
 
-extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_t *num_of_bboxes)
+extern "C" int run_detector(uint8_t*fb, int32_t w, int32_t h, bbox *bboxes, int max_bboxes)
 {
     TfLiteTensor *input = interpreter->input(0);
+
+    uint64_t start = esp_timer_get_time();
 
     if (USE_BILINEAR_INTERP) {
         scale_input_bilinear(input, fb, w, h);
@@ -322,19 +322,29 @@ extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_
         scale_input_nearest(input, fb, w, h);
     }
 
-    uint64_t start = esp_timer_get_time();
+
+    uint64_t end = esp_timer_get_time();
+
+    //printf("Scaling time: %ld ms\n", (int32_t)((end - start)/1000));
+
+    start = esp_timer_get_time();
 
     if (kTfLiteOk != interpreter->Invoke()) {
         printf("Invoke failed.\n");
     }
 
-    uint64_t end = esp_timer_get_time();
-    printf("Inference time: %ld ms\n", (int32_t)((end - start)/1000));
+    end = esp_timer_get_time();
+    //printf("Inference time: %ld ms\n", (int32_t)((end - start)/1000));
 
+    static uint64_t inference_total = 0;
+    static uint64_t num_of_inferences = 0;
+
+    inference_total += (end - start)/1000;
+    num_of_inferences++;
+
+    printf("Avg inference time: %ld ms\n", (int32_t)(inference_total / num_of_inferences));
 
     TfLiteTensor *output_tensor = interpreter->output(0);
-
-    //printf("Bytes: %d,  Scale: %f  Zero: %ld\n", output_tensor->bytes, output_tensor->params.scale, output_tensor->params.zero_point);
 
     int8_t *output = output_tensor->data.int8;
 
@@ -354,22 +364,22 @@ extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_
         int8_t qc = output[index+4];
 
         float coinfidence = dequantize(qc, output_tensor);
-        if (coinfidence > CONFIDENCE_TRESHOLD && detected_bboxes < MAX_BBOX) {
-            detected_bbox *bbox = &bboxes[detected_bboxes];
+        if (coinfidence > CONFIDENCE_TRESHOLD && detected_bboxes < MAX_TEMP_BBOX) {
+            bbox *bb = &temp_bboxes[detected_bboxes];
 
-            bbox->confidence = coinfidence;
+            bb->confidence = coinfidence;
 
-            bbox->w = dequantize(qw, output_tensor);
-            bbox->h = dequantize(qh, output_tensor);
+            bb->w = dequantize(qw, output_tensor);
+            bb->h = dequantize(qh, output_tensor);
 
-            bbox->x = dequantize(qx, output_tensor) - bbox->w*0.5f;
-            bbox->y = dequantize(qy, output_tensor) - bbox->h*0.5f;
+            bb->x = dequantize(qx, output_tensor) - bb->w*0.5f;
+            bb->y = dequantize(qy, output_tensor) - bb->h*0.5f;
 
-            bbox->object_type = 0;
+            bb->object_type = 0;
             int8_t max_prob = output[index+5];
             for (int c = 0; c < num_of_classes; c++) {
                 if (output[index+5+c] > max_prob) {
-                    bbox->object_type = c;
+                    bb->object_type = c;
                     max_prob = output[index+5+c];
                 }
             }
@@ -405,29 +415,34 @@ extern "C" detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_
         }
 
         float probability = dequantize(cp, output_tensor);
-        if (probability > CONFIDENCE_TRESHOLD && detected_bboxes < MAX_BBOX) {
-            detected_bbox *bbox = &bboxes[detected_bboxes];
+        if (probability > CONFIDENCE_TRESHOLD && detected_bboxes < MAX_TEMP_BBOX) {
+            bbox *bb = &temp_bboxes[detected_bboxes];
 
-            bbox->confidence = probability;
+            bb->confidence = probability;
 
-            bbox->w = dequantize(qw, output_tensor);
-            bbox->h = dequantize(qh, output_tensor);
+            bb->w = dequantize(qw, output_tensor);
+            bb->h = dequantize(qh, output_tensor);
 
-            bbox->x = dequantize(qx, output_tensor) - bbox->w*0.5f;
-            bbox->y = dequantize(qy, output_tensor) - bbox->h*0.5f;
+            bb->x = dequantize(qx, output_tensor) - bb->w*0.5f;
+            bb->y = dequantize(qy, output_tensor) - bb->h*0.5f;
 
-            bbox->object_type = best_class;
+            bb->object_type = best_class;
 
             detected_bboxes++;
         }
     }
     #endif
     
-    *num_of_bboxes = non_maximum_suppression(bboxes, detected_bboxes, IOU_TRESHOLD);
+    int num_of_bboxes = non_maximum_suppression(temp_bboxes, detected_bboxes, IOU_TRESHOLD);
 
-    for (int i = 0; i < *num_of_bboxes; i++) {
+    if (num_of_bboxes > max_bboxes) {
+        num_of_bboxes = max_bboxes;
+    }
+
+    for (int i = 0; i < num_of_bboxes; i++) {
+        bboxes[i] = temp_bboxes[i];
         bboxes[i].estimated_distance = estimate_distance(&bboxes[i]);
     }
 
-    return bboxes;
+    return num_of_bboxes;
 }

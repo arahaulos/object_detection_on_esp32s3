@@ -17,13 +17,13 @@ typedef struct
     float y;
     float w;
     float h;
-} detected_bbox;
+} bbox;
 
 
 
 
 void init_yolo(void);
-detected_bbox* run_detector(uint8_t*fb, int32_t w, int32_t h, uint32_t *num_of_bboxes);
+int run_detector(uint8_t*fb, int32_t w, int32_t h, bbox *bbox_buffer, int buffer_size);
 
 #ifdef __cplusplus
 }

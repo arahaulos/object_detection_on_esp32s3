@@ -21,15 +21,14 @@ def draw_bboxes(image, bboxes, color):
 
         draw.rectangle([(nbb.x, nbb.y), (nbb.x + nbb.w, nbb.y + nbb.h)], outline=color, width=4)
 
-        draw.text((nbb.x, nbb.y), "{0:.3g}".format(bbox.estimated_distance))
+        #draw.text((nbb.x, nbb.y), "{0:.3g}".format(bbox.estimated_distance))
     
     return image
 
 
 def main_loop():
 
-    #yolo = yolov5_detect.yolov5_detect("last-int8.tflite")
-    yolo = yolov8_detect.yolov8_detect("yolov8n_full_integer_quant.tflite")
+    yolo = yolov8_detect.yolov8_detect("yolov8n_256x256.tflite")
     serv = server.server("192.168.1.101", 6969, yolo)
 
     width, height = 640, 480
@@ -37,24 +36,29 @@ def main_loop():
 
     running = True
     while running:
-        image = serv.get_last_received_image()
-        bboxes = serv.get_last_received_bboxes()
 
-        if (image != None):
-            image = image.resize((width, height))
-            #bboxes2 = yolo.detect(image)
+        if (len(serv.get_clients()) > 0):
+            image = serv.get_last_received_image(serv.get_clients()[0])
+            bboxes = serv.get_last_received_bboxes(serv.get_clients()[0])
 
-            if (bboxes != None):
-                image = draw_bboxes(image, bboxes, "red")
+            #image = Image.open("test.png")
+            #bboxes = yolo.detect(image)
 
-            #if (bboxes2 != None):
-            #    image = draw_bboxes(image, bboxes2, "green")
+            if (image != None):
+                image = image.resize((width, height))
+                #bboxes2 = yolo.detect(image)
 
-            width, height = image.size
+                if (bboxes != None):
+                    image = draw_bboxes(image, bboxes, "red")
 
-            surf = pygame.image.fromstring(image.tobytes(), image.size, image.mode)
+                #if (bboxes2 != None):
+                #    image = draw_bboxes(image, bboxes2, "green")
 
-            screen.blit(surf, (0, 0))
+                width, height = image.size
+
+                surf = pygame.image.fromstring(image.tobytes(), image.size, image.mode)
+
+                screen.blit(surf, (0, 0))
 
         pygame.display.flip()
 

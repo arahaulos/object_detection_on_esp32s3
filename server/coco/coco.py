@@ -82,6 +82,14 @@ class coco_dataset:
 
         return list
     
+    def filter_images(self, label_names):
+        new_image_dict = {}
+        image_ids = self.get_images_containing(label_names)
+        for image_id in image_ids:
+            new_image_dict[image_id] = self.images[image_id]
+
+        self.images = new_image_dict
+    
     def filter_labels(self, label_names):
         for image_id in self.images:
             newlist = []

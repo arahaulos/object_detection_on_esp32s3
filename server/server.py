@@ -21,8 +21,6 @@ class server:
             data += bytes
             received += len(bytes)
 
-        self.frametimes = []
-
         return data
     
     def receive_string(self, sock):
@@ -34,6 +32,10 @@ class server:
             data += bytes
             
         return data.decode("utf-8")
+    
+    def send_string(self, sock, str):
+        data = str.encode('utf-8') + b'\0'
+        sock.sendall(data)
 
     def receive_bboxes(self, sock):
         print("Receiving bboxes")
@@ -69,14 +71,6 @@ class server:
 
         image_data = self.receive_bytes(sock, image_data_length)
 
-
-        time_point = time.perf_counter()
-        interval_time_ms = int((time_point - self.last_received_image_time)*1000)
-        self.last_received_image_time = time_point
-
-        print("interval: {}ms".format(interval_time_ms))
-
-
         return Image.open(io.BytesIO(image_data))
         
 
@@ -86,9 +80,9 @@ class server:
         HEADER_FORMAT = "<I"
         BBOX_FORMAT = "<Iffffff"
 
-        sock.send(struct.pack(HEADER_FORMAT), (len(bboxes)))
+        sock.send(struct.pack(HEADER_FORMAT, len(bboxes)))
         for bbox in bboxes:
-            sock.send(struct.pack(BBOX_FORMAT), (bbox.object_type, bbox.confidence, bbox.estimated_distance, bbox.x, bbox.y, bbox.w, bbox.h))
+            sock.send(struct.pack(BBOX_FORMAT, bbox.object_type, bbox.confidence, bbox.estimated_distance, bbox.x, bbox.y, bbox.w, bbox.h))
 
 
     def close(self):
@@ -98,7 +92,10 @@ class server:
     def handle_connection(self, addr, sock):
         self.active_connections += 1
 
-        print("Handling connection {}".format(addr))
+        client = addr[0]
+        if (client not in self.clients):
+            print("New client {}".format(client))
+            self.clients.append(client)
 
         sock.setblocking(True)
 
@@ -108,17 +105,28 @@ class server:
 
         if (request == "upload_image"):
             image = self.receive_image(sock)
+
+            time_point = time.perf_counter()
+            interval_time_ms = int((time_point - self.last_received_image_time)*1000)
+            self.last_received_image_time = time_point
+            print("interval: {}ms".format(interval_time_ms))
+
             if (image != None):
-                self.last_received_image = image
+                self.last_received_image[client] = image
 
         elif (request == "upload_bboxes"):
             bboxes = self.receive_bboxes(sock)
             if (bboxes != None):
-                self.last_received_bboxes = bboxes
+                self.last_received_bboxes[client] = bboxes
         elif (request == "request_object_detection"):
-            if (self.last_received_image != None):
-                bboxes = self.object_detector.detect(self.last_received_image)
+            if (client in self.last_received_image):
+                bboxes = self.object_detector.detect(self.last_received_image[client])
+                self.last_received_bboxes[client] = bboxes
                 self.send_bboxes(sock, bboxes)
+            else:
+                self.send_bboxes(sock, [])
+        elif (request == "ping"):
+            self.send_string(sock, "ping")
         else:
             print("unknown request")
 
@@ -147,9 +155,11 @@ class server:
     def __init__(self, ip, port, object_detector):
         self.running = True
         self.active_connections = 0
-        self.last_received_image = None
-        self.last_received_bboxes = None
+        self.last_received_image = {}
+        self.last_received_bboxes = {}
         self.object_detector = object_detector
+
+        self.clients = []
 
         self.last_received_image_time = time.perf_counter()
 
@@ -157,8 +167,17 @@ class server:
         self.thread = Thread(target = self.server_loop, args = (ip, port))
         self.thread.start()
 
-    def get_last_received_image(self):
-        return self.last_received_image
+    def get_clients(self):
+        return self.clients
+
+    def get_last_received_image(self, client):
+        if (client in self.last_received_image):
+            return self.last_received_image[client]
+        else:
+            return None
     
-    def get_last_received_bboxes(self):
-        return self.last_received_bboxes
+    def get_last_received_bboxes(self, client):
+        if (client in self.last_received_bboxes):
+            return self.last_received_bboxes[client]
+        else:
+            return None
