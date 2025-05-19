@@ -2,10 +2,11 @@ import coco.coco
 import bbox
 from PIL import Image
 import yolov5_detect
+import yolov8_detect
 import numpy as np
 
 
-def test_model_accuracy(model, dataset, iou_treshold = 0.5):
+def calculate_average_precision(model, dataset, object_class, iou_treshold = 0.5):
     images_tested = 0
 
     total_ground_truths = 0
@@ -32,9 +33,9 @@ def test_model_accuracy(model, dataset, iou_treshold = 0.5):
 
         predicted_boxes = model.detect(loaded_image, confidence_treshold=0.0)
         for pbbox in predicted_boxes:
-            pbbox.image_id = image_id
-
-        all_predictions.extend(predicted_boxes)
+            if (pbbox.object_type == object_class):
+                pbbox.image_id = image_id
+                all_predictions.append(pbbox)
 
         images_tested += 1
         print("Predicting: {}/{}".format(images_tested, len(dataset.images)))
@@ -79,6 +80,8 @@ def test_model_accuracy(model, dataset, iou_treshold = 0.5):
 
     print(ap)
 
+    return ap
+
 
 
 
@@ -89,16 +92,32 @@ def test_model_accuracy(model, dataset, iou_treshold = 0.5):
 
 
 def main():
-    #def __init__(self, annonations_file, files_folder):
-    #convert_coco_labels("data/val2017/", "data/annotations/instances_val2017.json", "newdataset2/images/val2017/", "newdataset2/labels/val2017/", "newdataset2/val2017.txt", ["person", "bicycle", "car"])
+    file1 = open("ap.txt", "w")
 
     coco_validation = coco.coco.coco_dataset("coco/data/annotations/instances_val2017.json", "coco/data/val2017/")
     coco_validation.filter_labels(["person"])
     coco_validation.filter_images(["person"])
 
-    yolo = yolov5_detect.yolov5_detect("yolov5n6-xiao-256x256.tflite")
+    yolov5_models = ["yolov5n6-xiao-192x192.tflite",
+                     "yolov5n6-xiao-256x256.tflite"]
+    
+    yolov8_models = ["yolov8n_192x192.tflite",
+                     "yolov8n_256x256.tflite"]
 
-    test_model_accuracy(yolo, coco_validation)
+    for m in yolov5_models:
+        yolo = yolov5_detect.yolov5_detect(m)
+        ap = calculate_average_precision(yolo, coco_validation, 0)
+    
+        file1.write("{} {}\n".format(m, ap))
+
+
+    for m in yolov8_models:
+        yolo = yolov8_detect.yolov8_detect(m)
+        ap = calculate_average_precision(yolo, coco_validation, 0)
+
+        file1.write("{} {}\n".format(m, ap))
+
+    file1.close()
 
 
 if __name__ == "__main__":

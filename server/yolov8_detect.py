@@ -79,7 +79,7 @@ class yolov8_detect:
                 cp = dequantize(output_data[0][4+c][i], self.output_quant)
 
                 if (cp > confidence_treshold):
-                    bboxes.append(bbox.bbox(0, cp, 0.0, rx - rw/2, ry - rh/2, rw, rh))
+                    bboxes.append(bbox.bbox(c, cp, 0.0, rx - rw/2, ry - rh/2, rw, rh))
 
 
         bboxes = nms.non_maximum_suppression(bboxes)
